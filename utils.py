@@ -132,3 +132,107 @@ def invalid_ipv4_examples(series: pd.Series, limit: int | None = None) -> list[s
 		return unique_invalid_values[:limit]
 	return unique_invalid_values
 
+
+def false_positive_aggressive_action_mask(
+	df: pd.DataFrame,
+	*,
+	fp_column: str = "falso_positivo",
+	action_column: str = "accion_tomada",
+) -> pd.Series:
+	"""Flag false positives that ended in an aggressive containment action."""
+	aggressive_actions = {"Bloqueado", "Cuarentenado"}
+	return df[fp_column].fillna(False) & df[action_column].isin(aggressive_actions)
+
+
+def resolved_without_timestamp_mask(
+	df: pd.DataFrame,
+	*,
+	resolved_column: str = "resuelto",
+	resolution_column: str = "timestamp_resolucion",
+) -> pd.Series:
+	"""Flag rows marked as resolved but missing a resolution timestamp."""
+	return df[resolved_column].fillna(False) & df[resolution_column].isna()
+
+
+def resolution_before_event_mask(
+	df: pd.DataFrame,
+	*,
+	event_column: str = "timestamp_evento",
+	resolution_column: str = "timestamp_resolucion",
+) -> pd.Series:
+	"""Flag rows whose resolution timestamp is earlier than the event timestamp."""
+	return df[resolution_column].notna() & df[event_column].notna() & (df[resolution_column] < df[event_column])
+
+
+def calculate_response_time_minutes(
+	df: pd.DataFrame,
+	*,
+	event_column: str = "timestamp_evento",
+	resolution_column: str = "timestamp_resolucion",
+) -> pd.Series:
+	"""Compute response time in minutes from event and resolution timestamps."""
+	return ((df[resolution_column] - df[event_column]).dt.total_seconds() / 60).round().astype("Int64")
+
+
+def response_time_inconsistency_mask(
+	reported: pd.Series,
+	calculated: pd.Series,
+	*,
+	tolerance_minutes: int = 30,
+) -> pd.Series:
+	"""Flag rows whose reported response time differs from the calculated one beyond tolerance."""
+	return reported.notna() & calculated.notna() & (reported.sub(calculated).abs() > tolerance_minutes)
+
+
+def sla_limit_series(
+	severity: pd.Series,
+	*,
+	sla_map: dict[str, int] | None = None,
+) -> pd.Series:
+	"""Map severity labels to their SLA limit in minutes."""
+	if sla_map is None:
+		sla_map = {"Crítica": 60, "Alta": 240, "Media": 480, "Baja": 1440}
+	return severity.map(sla_map).astype("Int64")
+
+
+def sla_violation_mask(response_minutes: pd.Series, sla_limits: pd.Series) -> pd.Series:
+	"""Flag rows whose response time exceeds the mapped SLA threshold."""
+	return response_minutes.notna() & sla_limits.notna() & (response_minutes > sla_limits)
+
+
+def same_source_destination_ip_mask(
+	df: pd.DataFrame,
+	*,
+	source_column: str = "ip_origen",
+	destination_column: str = "ip_destino",
+) -> pd.Series:
+	"""Flag rows where source and destination IPs are identical."""
+	return df[source_column].notna() & df[destination_column].notna() & (df[source_column] == df[destination_column])
+
+
+def successful_login_blocked_mask(
+	df: pd.DataFrame,
+	*,
+	event_type_column: str = "tipo_evento",
+	action_column: str = "accion_tomada",
+) -> pd.Series:
+	"""Flag rows where a successful login contradicts a blocked action."""
+	return df[event_type_column].eq("Login Exitoso") & df[action_column].eq("Bloqueado")
+
+
+def critical_false_positive_unresolved_mask(
+	df: pd.DataFrame,
+	*,
+	fp_column: str = "falso_positivo",
+	severity_column: str = "severidad",
+	resolved_column: str = "resuelto",
+) -> pd.Series:
+	"""Flag suspicious rows marked as critical false positives that remain unresolved."""
+	return df[fp_column].fillna(False) & df[severity_column].eq("Crítica") & ~df[resolved_column].fillna(False)
+
+
+def remaining_nulls_summary(df: pd.DataFrame) -> pd.DataFrame:
+	"""Return only columns that still contain missing values."""
+	remaining = df.isna().sum().rename("nulos").to_frame()
+	return remaining.loc[remaining["nulos"] > 0].sort_values("nulos", ascending=False)
+
