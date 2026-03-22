@@ -26,6 +26,16 @@ def load_siem_dataset(csv_path: str | Path, encoding: str = "utf-8") -> pd.DataF
 	return pd.read_csv(Path(csv_path), encoding=encoding, low_memory=False)
 
 
+def parse_mixed_datetime(series: pd.Series, dayfirst: bool = False) -> pd.Series:
+	"""Parse a Series with mixed datetime formats while preserving invalid entries as NaT."""
+	return pd.to_datetime(series, format="mixed", dayfirst=dayfirst, errors="coerce")
+
+
+def datetime_parse_failures(original: pd.Series, parsed: pd.Series) -> pd.Series:
+	"""Return original non-null values that could not be parsed into datetimes."""
+	return original[original.notna() & parsed.isna()]
+
+
 def dataframe_info_text(df: pd.DataFrame) -> str:
 	"""Return the output of DataFrame.info() as plain text."""
 	buffer = io.StringIO()
@@ -68,6 +78,35 @@ def normalize_text_columns(df: pd.DataFrame, columns: Iterable[str]) -> pd.DataF
 	return normalized
 
 
+def convert_nullable_integer_columns(df: pd.DataFrame, columns: Iterable[str]) -> pd.DataFrame:
+	"""Convert selected columns to nullable integers using pandas Int64 dtype."""
+	converted = df.copy()
+	for column in columns:
+		converted[column] = pd.to_numeric(converted[column], errors="coerce").astype("Int64")
+	return converted
+
+
+def convert_boolean_columns(df: pd.DataFrame, columns: Iterable[str]) -> pd.DataFrame:
+	"""Convert common boolean-like values to pandas' nullable boolean dtype."""
+	converted = df.copy()
+	boolean_map = {
+		True: True,
+		False: False,
+		"true": True,
+		"false": False,
+		"1": True,
+		"0": False,
+		"yes": True,
+		"no": False,
+	}
+	for column in columns:
+		normalized = converted[column]
+		if normalized.dtype == "object" or str(normalized.dtype).startswith("string"):
+			normalized = normalized.astype("string").str.strip().str.lower()
+		converted[column] = normalized.replace(boolean_map).astype("boolean")
+	return converted
+
+
 def is_valid_ipv4(value: object) -> bool:
 	"""Validate whether a value contains a syntactically correct IPv4 address."""
 	if pd.isna(value):
@@ -77,6 +116,11 @@ def is_valid_ipv4(value: object) -> bool:
 		return True
 	except ValueError:
 		return False
+
+
+def invalid_ipv4_mask(series: pd.Series) -> pd.Series:
+	"""Return a boolean mask marking invalid IPv4 values in a Series."""
+	return ~series.map(is_valid_ipv4)
 
 
 def invalid_ipv4_examples(series: pd.Series, limit: int | None = None) -> list[str]:
