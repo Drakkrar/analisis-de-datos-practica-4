@@ -236,3 +236,35 @@ def remaining_nulls_summary(df: pd.DataFrame) -> pd.DataFrame:
 	remaining = df.isna().sum().rename("nulos").to_frame()
 	return remaining.loc[remaining["nulos"] > 0].sort_values("nulos", ascending=False)
 
+
+def false_positive_rate_by_event(
+	df: pd.DataFrame,
+	*,
+	event_type_column: str = "tipo_evento",
+	fp_column: str = "falso_positivo",
+) -> pd.DataFrame:
+	"""Summarize false-positive rate and volume by event type."""
+	summary = (
+		df.groupby(event_type_column)[fp_column]
+		.agg(["mean", "count"])
+		.rename(columns={"mean": "tasa_fp", "count": "total"})
+	)
+	summary["tasa_fp"] = (summary["tasa_fp"] * 100).round(2)
+	return summary.sort_values(["tasa_fp", "total"], ascending=[False, False])
+
+
+def unresolved_critical_by_os(
+	df: pd.DataFrame,
+	*,
+	severity_column: str = "severidad",
+	resolved_column: str = "resuelto",
+	os_column: str = "sistema_operativo",
+) -> pd.Series:
+	"""Count unresolved critical events by operating system."""
+	mask = df[severity_column].eq("Crítica") & ~df[resolved_column].fillna(False)
+	return (
+		df.loc[mask, os_column]
+		.fillna("Desconocido")
+		.value_counts()
+	)
+
